@@ -1,0 +1,679 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MiniDog</title>
+<meta name="description" content="MiniDog pretrains a text-to-image diffusion transformer in 55 minutes and fine-tunes it in another 15 minutes on four RTX 3090 GPUs.">
+<link rel="icon" href="static/images/minidog-icon.jpg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Charis+SIL:ital,wght@0,400;0,700;1,400;1,700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: the REPA-E for T2I paper layout. A centred header (title, authors, TL;DR, hero with key
+   points beside the sample grid), then a 720px serif article column with margin sidenotes and a
+   fixed contents list on wide screens. One light theme, as in the reference, chosen deliberately. */
+:root {
+  color-scheme: light;
+  --bg-page: #ffffff;
+  --text-primary: #1a1a1a;
+  --text-secondary: #444444;
+  --text-muted: #666666;
+  --accent: #2563eb;
+  --accent-soft: #508af6;
+  --border-light: #e5e5e5;
+  --border-header: #e5e2dd;
+  --box-bg: #f8f9fa;
+  --config-bg: #fafbfc;
+  --code-bg: #f6f8fa;
+  --code-border: #e1e4e8;
+  --pill-bg: #fef3cd;
+  --pill-bg-hover: #fce8a6;
+  --pill-border: #dfc36a;
+  --note-bg: #fff8e6;
+  --note-border: #f0ad4e;
+  --row-group: #f2f2f2;
+  --row-ours: #e6ffe6;
+  --rule-strong: rgba(0, 0, 0, 0.28);
+  --rule-soft: rgba(0, 0, 0, 0.07);
+  --pink: #ff1493;
+  --purple: #9400d3;
+  --orange: #ff8c00;
+  --tok-text: #f8d6c5;
+  --tok-time: #ecbae7;
+  --tok-latent: #caecbd;
+  --tok-eupe: #c6c6c6;
+  --font-serif: "Charter", "Bitstream Charter", "Charis SIL", Georgia, serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --content: 720px;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+body {
+  margin: 0;
+  background: var(--bg-page);
+  color: var(--text-primary);
+  font: 400 18px/1.75 var(--font-serif);
+}
+img, video { max-width: 100%; height: auto; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+:focus-visible { outline: 3px solid var(--accent-soft); outline-offset: 2px; border-radius: 4px; }
+sup { line-height: 0; }
+
+/* Top bar */
+.topbar { border-bottom: 1px solid var(--border-light); padding-block: 12px; padding-inline: 20px; font-family: var(--font-sans); }
+.topbar .in { max-width: 1200px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
+.topbar .home { color: var(--text-primary); font-size: 15px; font-weight: 500; display: inline-flex; align-items: center; gap: 8px; }
+.topbar .home svg { width: 15px; height: 15px; opacity: 0.5; }
+.topbar .right { display: flex; gap: 20px; font-size: 14px; }
+.topbar .right a { color: var(--text-muted); }
+
+/* Header */
+.header-wrapper { border-bottom: 1px solid var(--border-header); }
+.central-header { max-width: 1000px; margin: 0 auto; padding-block: 40px; padding-inline: 20px; text-align: center; }
+.title-section h1 { font-size: 2.2rem; margin: 0; line-height: 1.3; font-weight: 700; }
+.venue { display: inline-block; margin: 14px 0 0; padding: 4px 14px; border-radius: 50px; background: #f3ecfb; color: #6a1fb0; border: 1px solid #d9c3f0; font-size: 0.95rem; font-weight: 700; letter-spacing: 0.02em; }
+.title-section h2 { font-size: 1.6rem; margin: 0.3em 0 0; line-height: 1.3; font-weight: 400; color: var(--text-secondary); text-wrap: balance; }
+.authors { margin: 20px 0; font-size: 1rem; line-height: 1.8; }
+.authors .logo-row { display: flex; justify-content: center; margin-bottom: 10px; }
+.authors .logo-row img { height: 46px; width: 46px; border-radius: 11px; object-fit: cover; }
+.authors .names span { white-space: nowrap; color: var(--accent); font-weight: 500; }
+.authors .affil { font-size: 0.9rem; color: var(--text-muted); }
+.tldr-section { margin: 25px auto; max-width: 800px; text-align: left; padding: 15px 20px; border-left: 4px solid var(--accent); background: var(--box-bg); }
+.tldr-section p { margin: 0; font-size: 1rem; line-height: 1.7; color: var(--text-secondary); }
+.tldr-section strong { color: var(--accent); }
+.tldr-label { font-weight: 700; color: var(--text-primary); margin-right: 6px; }
+.hero-section { display: flex; gap: 40px; margin: 30px auto 0; max-width: 1000px; text-align: left; align-items: flex-start; }
+.hero-section > .key-points, .hero-section > .hero-media { flex: 1; min-width: 0; }
+.key-points { display: flex; flex-direction: column; gap: 16px; }
+.key-point { display: flex; align-items: flex-start; gap: 12px; }
+.key-point svg { width: 24px; height: 24px; flex-shrink: 0; margin-top: 2px; color: var(--accent); }
+.key-point-text { font-size: 0.95rem; line-height: 1.5; color: var(--text-secondary); }
+.key-point-text strong { color: var(--accent); font-weight: 700; }
+.button-row { display: flex; gap: 10px; margin-top: 25px; flex-wrap: wrap; }
+.button-row a, .button-row span {
+  display: inline-flex; align-items: center; gap: 6px; background: var(--pill-bg); color: var(--text-primary);
+  border: 1.5px solid var(--pill-border); border-radius: 50px; padding: 8px 18px; font-size: 0.9rem; font-weight: 500;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06); text-decoration: none; transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
+.button-row a:hover { background: var(--pill-bg-hover); box-shadow: 0 3px 8px rgba(0, 0, 0, 0.12); text-decoration: none; }
+.button-row svg { width: 1em; height: 1em; }
+.button-row .soon { background: var(--box-bg); border-color: var(--border-light); color: var(--text-muted); box-shadow: none; cursor: default; }
+.hero-media video { display: block; width: 100%; border-radius: 6px; background: #000000; }
+.teaser { margin: 34px auto 0; max-width: 1000px; text-align: left; }
+.teaser img { display: block; width: 100%; border-radius: 4px; }
+.teaser figcaption { font-size: 0.85rem; line-height: 1.5; color: var(--text-muted); margin-top: 8px; }
+.swatch { display: inline-block; width: 0.8em; height: 0.8em; border-radius: 2px; vertical-align: -0.05em; margin-inline: 0.1em 0.25em; }
+.swatch.pink { background: var(--pink); }
+.swatch.purple { background: var(--purple); }
+.swatch.orange { background: var(--orange); }
+
+/* Article */
+.article { padding-inline: 20px; padding-block: 0 40px; }
+.article > * { max-width: var(--content); margin-inline: auto; }
+.text { font-size: 1.1rem; margin: 1em auto; }
+ol.text, ul.text { padding-left: 1.4em; line-height: 1.8; }
+ol.text li + li, ul.text li + li { margin-top: 0.5em; }
+.article hr { border: none; border-top: 1px solid #d0d0d0; margin: 40px auto; }
+.article hr.short { width: 60%; margin: 20px auto 10px; }
+h1.text { font-size: 2em; line-height: 1.25; margin: 0.4em auto 0.5em; text-wrap: balance; }
+h2.text { font-size: 1.8em; line-height: 1.25; margin: 0.4em auto 0.5em; }
+h3.text { font-size: 1.25em; line-height: 1.35; margin: 1.6em auto 0.4em; }
+.centered { text-align: center; }
+
+.icon-row { display: flex; justify-content: center; flex-wrap: wrap; padding: 20px 0 0; gap: 12px; }
+.icon-link {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;
+  color: var(--text-secondary); padding: 15px; border: 1px solid #e0e0e0; border-radius: 8px; background: var(--bg-page);
+  flex: 1 1 140px; max-width: 170px; min-height: 110px; line-height: 1.3; font-size: 0.95rem;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+.icon-link:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); text-decoration: none; }
+.icon-link svg { width: 44px; height: 44px; margin-bottom: 10px; color: var(--accent); }
+.click-hint {
+  display: flex; align-items: center; justify-content: center; gap: 8px; width: 85%; margin: 20px auto 0;
+  font-size: 15px; color: #333333; border: 2px solid #cccccc; padding: 10px; border-radius: 5px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); text-align: center;
+}
+.click-hint strong { color: var(--accent); }
+.click-hint svg { width: 1.3rem; height: 1.3rem; color: var(--accent); flex: none; }
+
+/* Sidenotes: in the right margin on wide screens, inline boxes otherwise */
+.sidenote-container { position: relative; }
+.sidenote {
+  font-size: 0.85em; line-height: 1.5; color: var(--text-muted); padding: 8px 12px; background: var(--box-bg);
+  border-left: 3px solid var(--accent-soft); margin: 12px 0; border-radius: 0 4px 4px 0; counter-increment: sidenote;
+}
+.sidenote::before { content: counter(sidenote) ". "; font-weight: 700; color: var(--accent-soft); }
+.article { counter-reset: sidenote; }
+@media (min-width: 1240px) {
+  .sidenote { position: absolute; top: 0.35em; right: -285px; width: 250px; margin: 0; background: transparent; border-left: 2px solid #dddddd; padding: 0 0 0 12px; border-radius: 0; }
+  .sidenote::before { color: #888888; }
+}
+
+/* Contents list */
+.toc-container { display: none; }
+@media (min-width: 1360px) {
+  .toc-container {
+    display: block; position: fixed; top: 120px; width: 160px; left: calc(50% - var(--content) / 2 - 160px - 120px);
+    font: 400 0.82rem/1.5 var(--font-sans); opacity: 0; transition: opacity 0.3s ease; z-index: 10;
+  }
+  .toc-container.visible { opacity: 1; }
+  .toc-container h4 { font-size: 0.75em; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin: 0 0 12px; }
+  .toc-container ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+  .toc-container a { color: var(--text-muted); }
+  .toc-container a:hover, .toc-container a.active { color: var(--accent); text-decoration: none; }
+  .toc-container a.active { font-weight: 600; }
+}
+
+/* Boxes */
+.config-box { background: var(--config-bg); border-left: 4px solid var(--accent-soft); border-radius: 4px; padding: 16px 20px; margin: 20px auto; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05); }
+.config-box > p { margin: 0 0 10px; color: #333333; font-weight: 700; font-size: 1.05rem; }
+.config-box > p strong { color: var(--accent-soft); }
+.config-box ul { margin: 0; padding-left: 20px; list-style: none; font-size: 1rem; }
+.config-box li { line-height: 1.6; color: #555555; }
+.config-box li + li { margin-top: 6px; }
+.config-box li strong { color: var(--text-primary); }
+.install-box { background: var(--note-bg); border-left: 3px solid var(--note-border); border-radius: 0 4px 4px 0; padding: 10px 14px; margin: 0 0 18px; font-size: 0.95rem; }
+.install-box strong { font-family: var(--font-sans); font-size: 0.85rem; }
+
+/* Figures */
+.fig { margin: 30px auto; }
+.fig img { display: block; width: 100%; }
+.fig figcaption { margin-top: 10px; font-size: 0.9em; color: var(--text-muted); line-height: 1.5; text-align: left; }
+.fig figcaption strong { color: var(--text-secondary); }
+.fig.small { max-width: 480px; }
+.legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 16px; margin-top: 10px; font: 400 0.82rem/1.4 var(--font-sans); color: var(--text-muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend img { width: 1rem; height: 1rem; }
+.legend i { display: inline-block; width: 0.8rem; height: 0.8rem; border-radius: 2px; }
+.legend .sep { width: 1px; height: 1rem; background: var(--border-light); }
+
+/* Tables, after the REPA-E data tables */
+.table-container { overflow-x: auto; margin: 30px auto; max-width: 700px; -webkit-overflow-scrolling: touch; }
+.data-table { border-collapse: separate; border-spacing: 2.5px; width: 100%; margin: 0 auto; font-size: 0.92rem; line-height: 1.25; border-bottom: 1px solid var(--rule-strong); }
+.data-table th, .data-table td { padding: 0.42em 0.6em; white-space: nowrap; text-align: center; font-variant-numeric: tabular-nums; }
+.data-table td { border-bottom: 1px solid var(--rule-soft); }
+.data-table thead th { border-bottom: 1px solid var(--rule-strong); font-weight: 700; }
+.data-table thead tr.top th { border-bottom: none; padding-bottom: 0; }
+.data-table thead tr.top th.span { border-bottom: 1px solid var(--rule-strong); }
+.data-table th:first-child, .data-table td:first-child { text-align: left; font-weight: 700; }
+.data-table tr.group td { background: var(--row-group); font-weight: 700; text-align: left; border-bottom: none; }
+.data-table tr.ours td, .data-table td.ours { background: var(--row-ours); }
+.data-table tbody tr:last-child td { border-bottom: none; }
+.data-table td.dash { color: var(--text-muted); }
+.data-table caption { caption-side: bottom; padding-top: 12px; font-size: 0.95rem; line-height: 1.5; color: var(--text-secondary); text-align: center; white-space: normal; }
+.data-table caption strong { color: var(--text-primary); }
+.data-table.wide-table td:not(:first-child) { white-space: normal; min-width: 7.5em; }
+
+/* Dropdown */
+details.dropdown { margin: 20px auto; border: 1px solid var(--border-light); border-left: 4px solid var(--accent-soft); border-radius: 4px; background: var(--config-bg); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05); }
+details.dropdown > summary { cursor: pointer; list-style: none; padding: 12px 18px; font-weight: 700; color: var(--accent-soft); display: flex; align-items: center; gap: 10px; }
+details.dropdown > summary::-webkit-details-marker { display: none; }
+details.dropdown > summary::before { content: ""; width: 0.5em; height: 0.5em; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(-45deg); transition: transform 0.2s ease; flex: none; }
+details.dropdown[open] > summary::before { transform: rotate(45deg); }
+details.dropdown > summary:hover { color: var(--accent); }
+details.dropdown .table-container { margin: 4px auto 18px; padding-inline: 12px; }
+
+/* Quickstart */
+.qs-card { border: 1px solid var(--border-light); border-radius: 8px; padding: 20px; background: var(--bg-page); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04); }
+.tabs { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 0 auto 18px; }
+.tab {
+  font: 600 0.88rem/1 var(--font-sans); padding: 10px 16px; border-radius: 4px; cursor: pointer;
+  background: #f1f1f1; color: #333333; border: 1px solid #dddddd;
+}
+.tab[aria-selected="true"] { background: var(--accent-soft); border-color: var(--accent-soft); color: #ffffff; }
+.panel h3 { font-size: 1.05rem; color: var(--accent-soft); margin: 0 0 6px; }
+.panel p { margin: 0 0 10px; font-size: 1rem; color: var(--text-secondary); }
+.code-wrap { position: relative; }
+pre {
+  margin: 0; overflow-x: auto; background: var(--code-bg); border: 1px solid var(--code-border); border-radius: 6px;
+  padding: 14px 16px; font: 400 0.8rem/1.6 var(--font-mono); color: #24292e;
+}
+.code-wrap pre { padding-top: 2.4em; }
+.copy-code {
+  position: absolute; top: 6px; right: 8px; font: 600 0.75rem/1 var(--font-sans); padding: 6px 9px; border-radius: 4px;
+  background: var(--accent-soft); color: #ffffff; border: none; cursor: pointer; opacity: 0; transition: opacity 0.2s ease;
+}
+.code-wrap:hover .copy-code, .copy-code:focus-visible { opacity: 1; }
+@media (hover: none) { .copy-code { opacity: 1; } }
+
+video { display: block; width: 100%; border-radius: 6px; background: #000000; }
+
+/* Appendix */
+.appendix { border-top: 1px solid var(--border-light); background: var(--box-bg); padding-block: 30px 40px; padding-inline: 20px; font-size: 0.95rem; }
+.appendix > * { max-width: var(--content); margin-inline: auto; }
+.appendix h3 { font: 600 0.8rem/1 var(--font-sans); text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin-top: 1.6rem; margin-bottom: 0.7rem; }
+.appendix p { margin-top: 0; margin-bottom: 0.4rem; color: var(--text-secondary); }
+.appendix pre { background: var(--bg-page); font-size: 0.78rem; }
+.footer { text-align: center; font: 400 0.82rem/1.5 var(--font-sans); color: var(--text-muted); padding-block: 18px 30px; padding-inline: 20px; }
+
+@media (max-width: 768px) {
+  .title-section h1 { font-size: 1.9rem; }
+  .title-section h2 { font-size: 1.2rem; }
+  .hero-section { flex-direction: column; gap: 25px; }
+  .hero-section > .hero-media { order: -1; }
+  .central-header { padding-block: 28px; }
+  h1.text { font-size: 1.65em; }
+  .text { font-size: 1.02rem; }
+  .icon-link { flex: 1 1 40%; }
+  .click-hint { width: 100%; }
+}
+</style>
+</head>
+<body>
+
+<nav class="toc-container" id="toc" aria-label="Contents">
+  <h4>Contents</h4>
+  <ul>
+    <li><a href="#resource">The MiniDog Resource</a></li>
+    <li><a href="#training">Training Recipe</a></li>
+    <li><a href="#results">Results</a></li>
+    <li><a href="#comparisons">Method Comparisons</a></li>
+    <li><a href="#conclusion">Conclusion</a></li>
+  </ul>
+</nav>
+
+<nav class="topbar" aria-label="Site">
+  <div class="in">
+    <a class="home" href="https://github.com/Reyhaneesmailizadeh/MiniDog">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M11 18l-6-6 6-6"/></svg>
+      Reyhaneesmailizadeh / minidog
+    </a>
+    <div class="right">
+      <a href="https://huggingface.co/datasets/reyhanehesi/minidog-data">Dataset</a>
+      <a href="https://huggingface.co/reyhanehesi/minidog-checkpoints">Checkpoints</a>
+    </div>
+  </div>
+</nav>
+
+<header class="header-wrapper">
+  <div class="central-header">
+    <div class="title-section">
+      <h1>MiniDog</h1>
+      <h2>Dog-Breed Text-to-image Flow Matching from Pretraining to Fine-Tuning on <em>4&nbsp;Consumer&nbsp;GPUs</em></h2>
+      <p class="venue">NeurIPS 2026 &middot; Education Track</p>
+    </div>
+
+    <div class="authors">
+      <div class="logo-row"><img src="static/images/minidog-icon.jpg" alt="MiniDog logo" width="46" height="46"></div>
+      <div class="names"><span>Reyhaneh Esmailizadeh</span>, <span>Xingjian Leng</span>, <span>Zhanhao Liang</span>, <span>Liang Zheng</span></div>
+      <div class="affil">The Australian National University</div>
+    </div>
+
+    <div class="tldr-section">
+      <p><span class="tldr-label">TL;DR:</span> We develop MiniDog, a framework that enables pretraining diffusion transformers in 55 minutes and fine-tuning in another 15 minutes on four 3090 GPUs. <strong>Data, models and code are open-sourced</strong>, so that beginners can train their own text-to-image models. MiniDog is teaching material accepted to the <strong>NeurIPS 2026 Education Track</strong>.</p>
+    </div>
+
+    <div class="hero-section">
+      <div class="key-points">
+        <div class="key-point">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9.5 2.5h5M12 2.5V5"/></svg>
+          <div class="key-point-text"><strong>Pretraining in 55 minutes</strong>: a 22M-parameter diffusion transformer pretrains in 55 minutes and fine-tunes in another 15 minutes on four 3090 GPUs.</div>
+        </div>
+        <div class="key-point">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/></svg>
+          <div class="key-point-text"><strong>From pretraining to fine-tuning</strong>: data, architecture, training methods, and evaluation metrics for text-to-image model training, in one codebase.</div>
+        </div>
+        <div class="key-point">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.5l8.5 4.8v9.4L12 21.5l-8.5-4.8V7.3z"/><path d="M3.8 7.4L12 12l8.2-4.6M12 12v9.4"/></svg>
+          <div class="key-point-text"><strong>Open resource</strong>: 26k recaptioned ImageNet dog photos, 2k FLUX.1-schnell images, code, configs, and checkpoints.</div>
+        </div>
+        <div class="button-row">
+          <span class="soon" aria-disabled="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/></svg>
+            Paper (coming soon)
+          </span>
+          <a href="https://github.com/Reyhaneesmailizadeh/MiniDog">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5"/></svg>
+            Code
+          </a>
+          <a href="https://huggingface.co/datasets/reyhanehesi/minidog-data">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5.5" rx="7.5" ry="2.8"/><path d="M4.5 5.5v13c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8v-13"/></svg>
+            Dataset
+          </a>
+          <a href="https://huggingface.co/reyhanehesi/minidog-checkpoints">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            Checkpoints
+          </a>
+        </div>
+      </div>
+      <div class="hero-media">
+        <video autoplay muted loop playsinline controls preload="metadata" poster="static/videos/minidog-video-poster.jpg" width="1280" height="720" aria-label="MiniDog in 44 seconds">
+          <source src="static/videos/minidog-video.mp4" type="video/mp4">
+        </video>
+      </div>
+    </div>
+
+    <figure class="teaser">
+      <img src="static/images/sft-samples-fig1.jpg" width="2000" height="849"
+           alt="Twenty-one dog images generated by MiniDog after supervised fine-tuning, in a grid of seven columns and three rows. A golden retriever is framed in pink, a corgi in purple and a sleeping samoyed in orange.">
+      <figcaption>Samples from the SFT model. Prompts of the highlighted samples:
+        <span class="swatch pink" aria-hidden="true"></span>“Golden Retriever with a dark golden, freshly brushed…”
+        <span class="swatch purple" aria-hidden="true"></span>“Corgi with a clean fawn-and-white coat stands alert…”
+        <span class="swatch orange" aria-hidden="true"></span>“Samoyed with a fluffy biscuit double coat, freshly brushed…”</figcaption>
+    </figure>
+  </div>
+</header>
+
+<main class="article" id="article">
+  <hr class="short">
+
+  <div class="sidenote-container">
+    <p class="text">Training diffusion models is computationally heavy, especially for frontier models, and beginners often struggle to find the opportunity to run the whole pipeline. MiniDog is a simple yet useful codebase, where pretraining and fine-tuning of text-to-image (T2I) models can be performed in about an hour and 15 minutes, respectively, on four 3090 GPUs. It targets advanced undergraduate and graduate courses and assumes linear algebra, calculus, probability, and deep learning. On completing the material, beginners can:</p>
+    <aside class="sidenote">MiniDog does not build a comprehensive T2I model. It is a minimal project that focuses on dog image generation, for the purpose of democratizing T2I training. We do not claim technical novelty.</aside>
+  </div>
+  <ol class="text">
+    <li><strong><a href="#resource">&sect;Build and pretrain</a></strong>: a text-to-image flow-matching pipeline on consumer GPUs.</li>
+    <li><strong><a href="#comparisons">&sect;Explain what changes FID</a></strong>: how the tokenizer, caption length, and representation alignment change FID.</li>
+    <li><strong><a href="#sft">&sect;Fine-tune and evaluate</a></strong>: fine-tune the model and evaluate it with human-preference models.</li>
+  </ol>
+
+  <div class="icon-row">
+    <a href="#training" class="icon-link">
+      <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 12h32M8 24h32M8 36h32"/><circle cx="17" cy="12" r="4" fill="#fff"/><circle cx="31" cy="24" r="4" fill="#fff"/><circle cx="21" cy="36" r="4" fill="#fff"/></svg>
+      Training Recipe
+    </a>
+    <a href="#resource" class="icon-link">
+      <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="18" width="11" height="12" rx="2"/><rect x="33" y="18" width="11" height="12" rx="2"/><rect x="18.5" y="8" width="11" height="12" rx="2"/><rect x="18.5" y="28" width="11" height="12" rx="2"/><path d="M15 24h3.5M29.5 24H33M24 20v8"/></svg>
+      Pipeline
+    </a>
+    <a href="#results" class="icon-link">
+      <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 40h36"/><path d="M10 34l9-10 7 6 12-15"/><path d="M31 15h7v7"/></svg>
+      Results
+    </a>
+    <a href="#comparisons" class="icon-link">
+      <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="8" width="36" height="32" rx="3"/><path d="M6 17h36M6 26h36M18 8v32"/></svg>
+      Method Comparisons
+    </a>
+  </div>
+  <p class="click-hint">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 9l11 4-5 2-2 5z"/><path d="M5 3.5l1.5 2M2.5 8.5H5M10 2v2.5"/></svg>
+    <strong>Click to jump to each section.</strong>
+  </p>
+
+  <hr>
+
+  <!-- The MiniDog resource -->
+  <section id="resource">
+    <h1 class="text">The MiniDog Resource</h1>
+    <p class="text"><strong>Data.</strong> Pretraining uses 26,000 recaptioned ImageNet images of 20 dog breeds. Supervised fine-tuning (SFT) uses 2,000 high-quality images of the same breeds that we generate with FLUX.1-schnell from text prompts written in the same structure as the real-photo captions. Evaluation uses 500 held-out prompts. All three datasets are released on Hugging Face.</p>
+    <div class="sidenote-container">
+      <p class="text"><strong>Pipeline.</strong> We adopt the DiffusionBench framework. During pretraining, the image caption passes through Qwen3-0.6B to obtain text tokens, and the paired image is fed to a VAE and an external vision encoder. Noise is added to the image latent. Timestep and text tokens are concatenated with the noisy latents into one sequence (in-context conditioning), and this sequence is fed into the diffusion transformer. The vision perception tokens are aligned with intermediate diffusion features at Block 4 of 12, and the flow-matching loss is also applied. At the SFT stage, we turn off the alignment loss and only use the flow-matching loss.</p>
+      <aside class="sidenote">The tokenizer is always frozen. Images are encoded into latents that are cached and reused during training, which reduces training time significantly.</aside>
+    </div>
+
+    <figure class="fig">
+      <img src="static/images/pipeline.svg" width="1107" height="292" alt="Diagram of the pretraining recipe. A caption goes through a frozen Qwen3-0.6B text encoder, the image through a frozen E2E-INVAE tokenizer and a frozen EUPE encoder. Text embeddings, a time token and noisy latents form one sequence for a trainable 12-block LightningDiT. Block 4 is aligned to the EUPE features, and the output is trained with the flow-matching loss.">
+      <div class="legend" aria-label="Legend">
+        <span><img src="static/images/frozen.png" alt="">Frozen</span>
+        <span><img src="static/images/trained.png" alt="">Trained</span>
+        <span class="sep" aria-hidden="true"></span>
+        <span><i style="background: var(--tok-text)"></i>Text embeddings</span>
+        <span><i style="background: var(--tok-time)"></i>Time token</span>
+        <span><i style="background: var(--tok-latent)"></i>Noisy latents</span>
+        <span><i style="background: var(--tok-eupe)"></i>EUPE features</span>
+      </div>
+      <figcaption><strong>T2I pretraining recipe.</strong> Frozen Qwen3, E2E-INVAE and EUPE ViT-B/16 produce the text embeddings, the latents (noised with ε) and the alignment targets. LightningDiT is pretrained with the flow-matching loss and the iREPA loss on Block 4.</figcaption>
+    </figure>
+
+    <div class="config-box">
+      <p><strong>Methods supported:</strong></p>
+      <ul>
+        <li><strong>Architecture:</strong> latent diffusion with a 12-block transformer (22.06M parameters) and in-context conditioning</li>
+        <li><strong>VAE:</strong> E2E-INVAE, E2E-VAVAE</li>
+        <li><strong>Representation alignment:</strong> REPA, iREPA</li>
+        <li><strong>Vision encoders:</strong> DINOv2, DINOv3, PE-Spatial, EUPE</li>
+        <li><strong>Fine-tuning:</strong> supervised fine-tuning and reward-model-based scoring</li>
+      </ul>
+    </div>
+
+    <div class="sidenote-container">
+      <p class="text"><strong>Evaluation metrics.</strong> We measure generation quality with gFID, using all 26k real pretraining images as the reference set and 26k images generated from the same pretraining prompts. We measure tokenizer reconstruction with PSNR, SSIM, LPIPS and rFID. To assess the effect of SFT, we use two human-preference models, HPSv2 and PickScore, averaged over 500 images that the pretrained and the SFT checkpoints each generate from the 500 held-out prompts.</p>
+      <aside class="sidenote">Inherited from DiffusionBench, the repository supports online evaluation of intermediate checkpoints. It doubles the pretraining time and adds about an hour to SFT.</aside>
+    </div>
+  </section>
+
+  <hr>
+
+  <!-- Training recipe -->
+  <section id="training">
+    <h1 class="text">Training Recipe</h1>
+    <p class="text">Unless otherwise stated, we pretrain for 200 epochs (~20k steps) and fine-tune for 100 epochs (~700 steps). Click below to see every hyperparameter of the final recipe.</p>
+    <details class="dropdown">
+      <summary>Show all hyperparameters of the final recipe</summary>
+    <div class="table-container">
+      <table class="data-table wide-table">
+        <thead><tr><th></th><th>Pretraining</th><th>SFT</th></tr></thead>
+        <tbody>
+          <tr class="group"><td colspan="3">Architecture</td></tr>
+          <tr><td>Backbone</td><td colspan="2">LightningDiT</td></tr>
+          <tr><td>Input dim.</td><td colspan="2">16×16×32</td></tr>
+          <tr><td>Patch size</td><td colspan="2">1</td></tr>
+          <tr><td>Num. layers</td><td colspan="2">12</td></tr>
+          <tr><td>Hidden dim.</td><td colspan="2">384</td></tr>
+          <tr><td>Num. heads</td><td colspan="2">6</td></tr>
+          <tr><td>Timestep / text tokens</td><td colspan="2">4 / 128</td></tr>
+          <tr><td>Text encoder</td><td colspan="2">Qwen3-0.6B (frozen)</td></tr>
+          <tr><td>Tokenizer</td><td colspan="2">E2E-INVAE (frozen)</td></tr>
+          <tr class="group"><td colspan="3">Alignment (final recipe)</td></tr>
+          <tr><td>Target representation</td><td>EUPE ViT-B/16</td><td class="dash">–</td></tr>
+          <tr><td>Method</td><td>iREPA</td><td class="dash">–</td></tr>
+          <tr><td>Distance <i>d</i></td><td>mean squared error</td><td class="dash">–</td></tr>
+          <tr><td>λ</td><td>0.5</td><td class="dash">–</td></tr>
+          <tr><td>Alignment depth</td><td>4</td><td class="dash">–</td></tr>
+          <tr><td>Projector <i>g</i><sub>φ</sub></td><td>3×3 conv, 384→768, padding 1</td><td class="dash">–</td></tr>
+          <tr><td>Spatial norm. γ, ε</td><td>0.7, 10<sup>−6</sup></td><td class="dash">–</td></tr>
+          <tr class="group"><td colspan="3">Alignment (compared in the vision-encoder table)</td></tr>
+          <tr><td>Target representations</td><td>DINOv2, DINOv3, PE-Spatial, EUPE</td><td class="dash">–</td></tr>
+          <tr><td>Methods</td><td>REPA (linear, 384→768), iREPA</td><td class="dash">–</td></tr>
+          <tr><td>Distances <i>d</i></td><td>mean squared error, cosine</td><td class="dash">–</td></tr>
+          <tr class="group"><td colspan="3">Optimization</td></tr>
+          <tr><td>Training data</td><td>26k images</td><td>2k images</td></tr>
+          <tr><td>Epochs</td><td>200 (~20k steps)</td><td>100</td></tr>
+          <tr><td>Batch size</td><td>256</td><td>256</td></tr>
+          <tr><td>Optimizer</td><td>AdamW</td><td>AdamW</td></tr>
+          <tr><td>Learning rate</td><td>10<sup>−4</sup>, then linear decay</td><td>5×10<sup>−5</sup>, constant</td></tr>
+          <tr><td>(β<sub>1</sub>, β<sub>2</sub>)</td><td>(0.9, 0.999)</td><td>(0.9, 0.999)</td></tr>
+          <tr><td>Weight decay</td><td>0</td><td>0</td></tr>
+          <tr><td>Gradient clipping</td><td>1.0</td><td>1.0</td></tr>
+          <tr><td>EMA decay</td><td>0.9995</td><td>0.995</td></tr>
+          <tr><td>Condition dropout</td><td>0.1</td><td>0.1</td></tr>
+          <tr><td>Precision</td><td>bf16</td><td>bf16</td></tr>
+          <tr class="group"><td colspan="3">Interpolants and sampling</td></tr>
+          <tr><td>α<sub>t</sub>, σ<sub>t</sub></td><td colspan="2">1−t, t</td></tr>
+          <tr><td>Training objective</td><td colspan="2">v-prediction</td></tr>
+          <tr><td>Timestep sampling</td><td colspan="2">logit-normal(0,1), shift √2</td></tr>
+          <tr><td>Sampler</td><td colspan="2">Euler (ODE), 50 steps</td></tr>
+          <tr><td>Guidance (CFG scale)</td><td colspan="2">6.0</td></tr>
+        </tbody>
+        <caption><strong>Hyperparameters of the final recipe.</strong> Configs: <code>pretrain_e2e-invae_128tok_mse_irepa_eupe.yaml</code> and <code>sft_e2e-invae_128tok_mse_norepa.yaml</code>.</caption>
+      </table>
+    </div>
+    </details>
+    <div class="config-box">
+      <p><strong>Computing resources:</strong></p>
+      <ul>
+        <li><strong>GPUs:</strong> 4 of the 8 NVIDIA RTX 3090 GPUs (24 GB, 350 W) in a single server, connected over PCIe 4.0 without NVLink</li>
+        <li><strong>CPU and memory:</strong> two AMD EPYC 7343 CPUs (32 cores in total), 256 GB of RAM, and the cached inputs on a local NVMe SSD</li>
+        <li><strong>Software:</strong> Ubuntu 24.04, NVIDIA driver 590.44, Python 3.13, PyTorch 2.10.0 with CUDA 12.8, cuDNN 9.10, NCCL 2.27, and Triton 3.6; <code>pyproject.toml</code> and <code>uv.lock</code> pin every package version</li>
+        <li><strong>Parallelism:</strong> PyTorch DistributedDataParallel over the 4 GPUs (64 images per GPU)</li>
+      </ul>
+    </div>
+  </section>
+
+  <hr>
+
+  <!-- Results -->
+  <section id="results">
+    <h1 class="text">Results</h1>
+    <h3 class="text">Our best recipe</h3>
+    <p class="text">Our best pretraining recipe is to use E2E-INVAE as the tokenizer, 128-token captions, iREPA for acceleration with a mean squared error loss, and EUPE as the external vision encoder. This recipe yields <strong>gFID = 8.32</strong> at a resolution of 256×256. We then apply standard SFT, which gives <strong>HPSv2 = 0.2427</strong> and <strong>PickScore = 19.61</strong>. Samples after SFT are shown at the top of this page.</p>
+    <h3 class="text">Efficiency</h3>
+    <p class="text">Using four 3090 GPUs, pretraining for 200 epochs takes 55 minutes, while SFT for 100 epochs takes 15 minutes. The image and text tokens are precomputed and cached before training.</p>
+    <p class="text">MiniDog also runs on a single 3090 GPU. Accumulating gradients over four micro-batches of 64 images keeps the batch of 256 images and the training schedule of the four-GPU run, and pretraining then takes about 3 hours, excluding the in-training FID evaluation.</p>
+  </section>
+
+  <hr>
+
+  <!-- Method comparisons -->
+  <section id="comparisons">
+    <h1 class="text">Method Comparisons</h1>
+    <p class="text">Each comparison changes one setting and keeps the others fixed. In the tables, green marks the setting used in the final recipe, and bold marks the best value.</p>
+
+    <h3 class="text">Comparing E2E-INVAE and E2E-VAVAE</h3>
+    <p class="text">Both VAEs, trained by the REPA-E method, are publicly available. To compare VAEs, both reconstruction and diffusability are important. We first compare their reconstruction performance: across the four metrics, E2E-INVAE is consistently better. We then compare how they support diffusion model training, where E2E-INVAE also yields lower gFID scores, that is, better diffusability.</p>
+    <div class="table-container">
+      <table class="data-table">
+        <thead><tr><th>Tokenizer</th><th>PSNR↑</th><th>SSIM↑</th><th>LPIPS↓</th><th>rFID↓</th></tr></thead>
+        <tbody>
+          <tr class="ours"><td>E2E-INVAE</td><td><strong>28.42</strong></td><td><strong>0.792</strong></td><td><strong>0.039</strong></td><td><strong>1.14</strong></td></tr>
+          <tr><td>E2E-VAVAE</td><td>27.59</td><td>0.753</td><td>0.044</td><td>1.39</td></tr>
+        </tbody>
+        <caption><strong>VAE reconstruction comparison.</strong> We report four metrics for the E2E-INVAE and E2E-VAVAE.</caption>
+      </table>
+    </div>
+    <figure class="fig small">
+      <img src="static/images/vae-compare.svg" width="683" height="266" alt="FID against training steps from 10k to 20k. E2E-VAVAE falls from about 27 to 12.23; E2E-INVAE falls from about 16.5 to 8.32 and stays lower throughout.">
+      <figcaption><strong>VAE diffusability comparison.</strong> Pretraining gFID with EUPE, iREPA, and 128 tokens.</figcaption>
+    </figure>
+
+    <h3 class="text">Long caption vs. short caption</h3>
+    <p class="text">For each dog image, we provide a short caption (64 tokens maximum) and a long caption (128 tokens maximum). We compare them using E2E-INVAE, with iREPA, the EUPE encoder and the MSE loss. Training with long captions yields lower gFID, which indicates that long captions allow pretraining to converge faster than short captions.</p>
+    <div class="table-container">
+      <table class="data-table" style="max-width: 420px">
+        <thead><tr><th>FID↓</th><th>64 tokens</th><th>128 tokens</th></tr></thead>
+        <tbody><tr><td>E2E-INVAE</td><td>8.54</td><td class="ours"><strong>8.32</strong></td></tr></tbody>
+        <caption><strong>Comparing the FIDs of short and long captions in the pretraining stage.</strong></caption>
+      </table>
+    </div>
+
+    <div class="sidenote-container">
+      <h3 class="text">REPA vs. iREPA</h3>
+      <p class="text">We compare REPA, iREPA and a baseline without REPA. REPA clearly accelerates convergence of the baseline. Moreover, when using the EUPE encoder, iREPA converges faster than REPA.</p>
+      <aside class="sidenote">iREPA keeps the REPA loss but replaces the projector with a 3×3 convolution over the 16×16 grid of hidden states, and normalizes the target features across the patches of each image (γ = 0.7).</aside>
+    </div>
+    <figure class="fig small">
+      <img src="static/images/repa-compare.svg" width="683" height="304" alt="FID against training steps from 10k to 20k for three runs. Without REPA, FID falls from about 34.6 to about 11.5; with REPA from about 19.7 to 9.71; with iREPA from about 16.5 to 8.32.">
+      <figcaption><strong>Comparing REPA, iREPA, and no REPA.</strong> We use E2E-INVAE, EUPE encoder, 128 tokens, and MSE loss.</figcaption>
+    </figure>
+
+    <div class="sidenote-container">
+      <h3 class="text">Comparing different vision encoders</h3>
+      <p class="text">DINOv2 performs the best for REPA, while EUPE performs the best for iREPA. While REPA is slightly better under the PE-Spatial encoder, the overall best performance is achieved with iREPA and EUPE. The mean squared error loss is superior to the cosine similarity loss for both REPA and iREPA.</p>
+      <aside class="sidenote">The EUPE encoder is trained by distilling from DINOv3, PE-Core, and PE-Lang. Its spatially coherent dense features may explain its advantage for iREPA.</aside>
+    </div>
+    <div class="table-container">
+      <table class="data-table" style="max-width: 560px">
+        <thead><tr><th>Target representation</th><th>REPA FID↓</th><th>iREPA FID↓</th></tr></thead>
+        <tbody>
+          <tr class="group"><td colspan="3">Squared error</td></tr>
+          <tr><td>DINOv2 ViT-B/14</td><td><strong>8.80</strong></td><td>8.68</td></tr>
+          <tr><td>PE-Spatial B/16</td><td>9.56</td><td>9.65</td></tr>
+          <tr><td>EUPE ViT-B/16</td><td>9.71</td><td class="ours"><strong>8.32</strong></td></tr>
+          <tr><td>DINOv3 ViT-B/16</td><td>10.12</td><td>8.46</td></tr>
+          <tr class="group"><td colspan="3">Cosine</td></tr>
+          <tr><td>DINOv2 ViT-B/14</td><td>9.14</td><td>8.89</td></tr>
+          <tr><td>PE-Spatial B/16</td><td>9.89</td><td>9.99</td></tr>
+          <tr><td>EUPE ViT-B/16</td><td>10.20</td><td>8.37</td></tr>
+          <tr><td>DINOv3 ViT-B/16</td><td>10.32</td><td>9.01</td></tr>
+        </tbody>
+        <caption><strong>Comparing external vision encoders, REPA vs. iREPA, and MSE vs. cosine similarity.</strong> We use E2E-INVAE and 128 prompt tokens. λ = 0.5.</caption>
+      </table>
+    </div>
+
+    <h3 class="text" id="sft">Benefit of supervised fine-tuning</h3>
+    <p class="text">We compare our pretrained model and the SFT model with two pretrained reward models, which generally reflect how much people would like an image given its prompt. The HPSv2 and PickScore of the SFT model are consistently higher than those of the pretrained model, mainly because of the high-quality SFT data. FID (not shown) of the SFT model is higher than that of the pretrained model, because the high-quality SFT data pulls the model away from the pretraining distribution. The samples at the top of this page are cherry-picked.</p>
+    <div class="table-container">
+      <table class="data-table" style="max-width: 420px">
+        <thead><tr><th></th><th>HPSv2↑</th><th>PickScore↑</th></tr></thead>
+        <tbody>
+          <tr><td>Pretrained</td><td>0.1625</td><td>18.42</td></tr>
+          <tr class="ours"><td>SFT</td><td><strong>0.2427</strong></td><td><strong>19.61</strong></td></tr>
+        </tbody>
+        <caption><strong>Human-preference scores of the pretrained and SFT checkpoints.</strong></caption>
+      </table>
+    </div>
+  </section>
+
+  <hr>
+
+  <section id="conclusion">
+    <h2 class="text">Conclusion</h2>
+    <p class="text">MiniDog does not build a comprehensive T2I model. Instead, it is a minimal project that focuses on dog image generation for the purpose of democratizing T2I training. Under our configuration, pretraining takes only about an hour on four 3090 GPUs and yields an FID of 8.32 at a resolution of 256×256. Users can spend another 15 minutes on supervised fine-tuning, which improves image quality as judged by pretrained reward models. The entire project, including data, models, and code, has been open-sourced, with the hope of allowing researchers to get started and evaluate their ideas.</p>
+  </section>
+</main>
+
+<section class="appendix" aria-labelledby="team-h">
+  <h3 id="team-h">Team</h3>
+  <p>Reyhaneh Esmailizadeh, Xingjian Leng, Zhanhao Liang, Liang Zheng</p>
+  <p>The Australian National University</p>
+  <h3 id="bibtex-h">BibTeX</h3>
+  <div class="code-wrap">
+<pre id="bibtex-text"><code>@misc{esmailizadeh2026minidog,
+  title  = {MiniDog: Dog-Breed Text-to-image Flow Matching from Pretraining
+            to Fine-Tuning on 4 Consumer GPUs},
+  author = {Esmailizadeh, Reyhaneh and Leng, Xingjian and Liang, Zhanhao and Zheng, Liang},
+  year   = {2026},
+  url    = {https://github.com/Reyhaneesmailizadeh/MiniDog},
+  note   = {NeurIPS 2026 Education Track}
+}</code></pre>
+  </div>
+</section>
+<footer class="footer">
+  Website template adapted from the <a href="https://end2end-diffusion.github.io/repa-e-t2i/">REPA-E for T2I</a> project page. Figures, tables and numbers are from the MiniDog paper.
+</footer>
+
+<script>
+(function () {
+  // Quickstart tabs
+  var tabs = Array.prototype.slice.call(document.querySelectorAll(".tab"));
+  tabs.forEach(function (tab) {
+    tab.addEventListener("click", function () {
+      tabs.forEach(function (t) {
+        var on = t === tab;
+        t.setAttribute("aria-selected", on ? "true" : "false");
+        document.getElementById(t.getAttribute("aria-controls")).hidden = !on;
+      });
+    });
+  });
+
+  // Copy buttons on code blocks
+  Array.prototype.forEach.call(document.querySelectorAll(".code-wrap"), function (wrap) {
+    var pre = wrap.querySelector("pre");
+    var btn = document.createElement("button");
+    btn.type = "button"; btn.className = "copy-code"; btn.textContent = "Copy";
+    btn.addEventListener("click", function () {
+      var done = function (label) { btn.textContent = label; setTimeout(function () { btn.textContent = "Copy"; }, 1500); };
+      var select = function () {
+        var r = document.createRange(); r.selectNodeContents(pre);
+        var s = window.getSelection(); s.removeAllRanges(); s.addRange(r); done("Selected");
+      };
+      try { navigator.clipboard.writeText(pre.innerText).then(function () { done("Copied"); }, select); }
+      catch (e) { select(); }
+    });
+    wrap.appendChild(btn);
+  });
+
+  // Contents list: show after the header, highlight the current section
+  var toc = document.getElementById("toc");
+  var header = document.querySelector(".header-wrapper");
+  var links = Array.prototype.slice.call(toc.querySelectorAll("a"));
+  var sections = links.map(function (a) { return document.querySelector(a.getAttribute("href")); });
+  function onScroll() {
+    var y = window.scrollY;
+    toc.classList.toggle("visible", y > header.offsetTop + header.offsetHeight - 200);
+    var current = 0;
+    sections.forEach(function (s, i) { if (s && s.getBoundingClientRect().top < 160) current = i; });
+    links.forEach(function (a, i) { a.classList.toggle("active", i === current); });
+  }
+  window.addEventListener("scroll", onScroll, { passive: true });
+  onScroll();
+})();
+</script>
+</body>
+</html>

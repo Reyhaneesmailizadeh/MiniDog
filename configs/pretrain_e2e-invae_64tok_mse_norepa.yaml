@@ -1,0 +1,90 @@
+stage_1:
+  target: minidog.vae.VAE
+  params:
+    vae_type: "e2e-invae"
+    resolution: 256
+
+stage_2:
+  target: minidog.dit.LightningDiT
+  params:
+    input_size: 16
+    patch_size: 1
+    in_channels: 32
+    hidden_size: 384
+    depth: 12
+    num_heads: 6
+    mlp_ratio: 4.0
+
+conditioning:
+  type: "text"
+  cfg_dropout_prob: 0.1
+  text_encoder:
+    model_name: "Qwen/Qwen3-0.6B"
+    max_length: 64
+  arch:
+      num_t_tokens: 4
+
+transport:
+  prediction: 'velocity'
+  time_dist_type: 'logit-normal_0_1'
+
+sampler:
+  num_steps: 50
+
+guidance:
+  cfg:
+    scale: 6.0
+    t_min: 0.0
+    t_max: 1.0
+
+dataset:
+  target: 'dogs'
+  type: 'latents'
+  data_dir: "data/dog-t2i-diffusion-data/dogs_recaptioned_64tok_latents_e2e-invae"
+  condition_type: "text"
+  shuffle_buffer: 5000
+  seed: 42
+  shared_tmpdir: "~/tmp"
+
+training:
+  epochs: 200
+  global_batch_size: 256
+  grad_accum_steps: 1
+  ema_decay: 0.9995
+  num_workers: 4
+  log_interval: 100
+  checkpoint_interval: 50
+  sample_every: 1000
+  clip_grad: 1.0
+  global_seed: 42
+  optimizer:
+    lr: 1.0e-4
+    betas: [0.9, 0.999]
+    weight_decay: 0.0
+  scheduler:
+    type: linear
+    warmup_epochs: 100
+    decay_end_epoch: 600
+    base_lr: 1.0e-4
+    final_lr: 1.0e-5
+    warmup_from_zero: false
+  image_size: 256
+
+eval:
+  eval_interval: 5000
+  eval_model: false
+  eval_dir: "results/evals/e2e-invae-norepa-64tok"
+  datasets:
+    dogs:
+      target: 'dogs'
+      type: 'wds'
+      data_dir: 'data/dog-t2i-diffusion-data/dogs_recaptioned_64tok_wds'
+      condition_type: 'text'
+      reference_npz: 'data/dog-t2i-diffusion-data/dogs_recaptioned_stats.npz'
+
+
+misc:
+  latent_size: [32, 16, 16]
+  num_classes: 1000
+  time_dist_shift_dim: 8192
+  time_dist_shift_base: 4096

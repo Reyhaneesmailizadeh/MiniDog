@@ -1,0 +1,34 @@
+# data, checkpoints, outputs
+data
+data/
+ckpts/
+results/
+wandb/
+
+# python / uv
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# notebooks / editors
+.ipynb_checkpoints/
+.vscode/
+.claude/
+
+# symlinked run logs
+wandb
+
+# archives
+*.zip
+
+# LaTeX sources and build artefacts of the papers (kept out of the code repo)
+Neurips2026Submission_refined_saeed_version/
+minidog_neurips_overleaf-2/
+minidog_neurips_overleaf-3/
+data2reyckpts/
+*.aux
+*.bbl
+*.blg
+*.synctex.gz
+Neurips2026Submission_final_version*/

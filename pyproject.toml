@@ -1,0 +1,38 @@
+[project]
+name = "minidog"
+version = "0.1.0"
+description = "Dog-breed text-to-image diffusion transformer, from pretraining to fine-tuning"
+requires-python = ">=3.10,<3.14"
+dependencies = [
+  "diffusers==0.36.0",
+  "einops==0.8.1",
+  "huggingface-hub>=0.34",
+  "numpy==2.2.6",
+  "omegaconf==2.3.0",
+  "pillow==12.0.0",
+  "scipy==1.15.3",
+  "timm==0.9.16",
+  "torch==2.10.0+cu128",
+  "torch-fidelity==0.3.0",
+  "torchvision==0.25.0",
+  "tqdm==4.67.1",
+  "transformers==4.57.1",
+  "wandb==0.23.1",
+  "webdataset==1.0.2",
+  "jupyterlab>=4.0",
+  "matplotlib==3.10.8",
+  "hpsv2>=1.2.0",
+]
+
+[tool.uv]
+environments = [
+    "sys_platform == 'linux'",
+]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu128" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
