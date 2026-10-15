@@ -2,6 +2,7 @@
 
 <p align="center">
   <a href="https://neurips.cc/" target="_blank"><img src="https://img.shields.io/badge/NeurIPS%202026-Education%20Track-7B2CBF?style=for-the-badge" alt="NeurIPS 2026 Education Track"></a>
+  <a href="https://arxiv.org/abs/2610.18870" target="_blank"><img src="https://img.shields.io/badge/arXiv-2610.18870-B31B1B?style=for-the-badge&logo=arxiv&logoColor=white" alt="arXiv"></a>
   <a href="https://reyhaneesmailizadeh.github.io/MiniDog/" target="_blank"><img src="https://img.shields.io/badge/Project-Page-2563EB?style=for-the-badge" alt="Project page"></a>
   <a href="https://huggingface.co/datasets/reyhanehesi/minidog-data" target="_blank"><img src="https://img.shields.io/badge/HuggingFace-FFD21E?style=for-the-badge&logo=huggingface&logoColor=white" alt="Dataset"></a>
   <a href="https://huggingface.co/reyhanehesi/minidog-checkpoints" target="_blank"><img src="https://img.shields.io/badge/Checkpoints-FFD21E?style=for-the-badge&logo=huggingface&logoColor=white" alt="Checkpoints"></a>
@@ -318,12 +319,15 @@ for example `pretrain_e2e-invae_128tok_mse_irepa_eupe.yaml` for the final recipe
 
 ```bibtex
 @misc{esmailizadeh2026minidog,
-  title  = {MiniDog: Dog-Breed Text-to-image Flow Matching from Pretraining
-            to Fine-Tuning on 4 Consumer GPUs},
-  author = {Esmailizadeh, Reyhaneh and Leng, Xingjian and Liang, Zhanhao and Zheng, Liang},
-  year   = {2026},
-  url    = {https://github.com/Reyhaneesmailizadeh/MiniDog},
-  note   = {NeurIPS 2026 Education Track}
+  title         = {MiniDog: Dog-Breed Text-to-image Flow Matching from Pretraining
+                   to Fine-Tuning on 4 Consumer GPUs},
+  author        = {Esmailizadeh, Reyhaneh and Leng, Xingjian and Liang, Zhanhao and Zheng, Liang},
+  year          = {2026},
+  eprint        = {2610.18870},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.CV},
+  url           = {https://arxiv.org/abs/2610.18870},
+  note          = {NeurIPS 2026 Education Track}
 }
 ```
 
