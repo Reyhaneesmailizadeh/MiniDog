@@ -225,11 +225,11 @@ configs that are not in the paper, and every path, are listed in [`configs/READM
 </details>
 
 
-## Training on a Mac (Apple silicon, 16 GB)
+## Training on a Mac (Apple silicon, 48 GB)
 
 > [!NOTE]
-> This is the `mac-m5` branch. It runs the best recipe on a Mac's GPU (PyTorch's MPS backend)
-> within 16 GB of shared memory, with the same 256-image updates as the paper:
+> It runs the best recipe on a Mac's GPU (PyTorch's MPS backend)
+> within 48 GB of shared memory, with the same 256-image updates as the paper:
 >
 > - **Micro-batch 16 × 16 accumulation steps** instead of 64 × 4, so each update still averages 256 images.
 > - **A shuffled feature cache with a 500-sample buffer.** The cached shards are sorted by breed;
@@ -241,7 +241,7 @@ configs that are not in the paper, and every path, are listed in [`configs/READM
 >   is saved next to the cache as `null_text.pt`.
 > - **A checkpoint every 5 epochs, keeping the newest 2**, so you can stop the laptop and resume.
 >
-> Measured on a 16 GB M5 MacBook with the Mac config: the training process uses 5.3–5.8 GB of
+> Measured on a 48 GB M4 MacBook with the Mac config: the training process uses 5.3–5.8 GB of
 > unified memory during training steps and at most 6.8 GB while a sample grid is drawn (grids are
 > decoded two images at a time), and its data-loading worker another 0.7 GB, so about 6.5 GB in
 > total and 7.5 GB at the peak. macOS and your open apps need the rest, so close what you can.
@@ -250,13 +250,13 @@ configs that are not in the paper, and every path, are listed in [`configs/READM
 > for about 45 GB of free disk during caching and 30 GB after.
 
 <details open>
-<summary><b>Steps on the Mac</b> &nbsp;·&nbsp; about 3–4 days of pretraining and 3 hours of fine-tuning on an M5</summary>
+<summary><b>Steps on the Mac</b> &nbsp;·&nbsp; about 1-3 days of pretraining depending on spec. and 1 hour of fine-tuning</summary>
 <br>
 
 **Install and download.** `uv` installs Python 3.13 and the macOS build of PyTorch.
 
 ```bash
-git clone -b mac-m5 https://github.com/Reyhaneesmailizadeh/minidog && cd minidog
+git clone https://github.com/Reyhaneesmailizadeh/minidog && cd minidog
 curl -LsSf https://astral.sh/uv/install.sh | sh   # skip if you already have uv
 uv sync
 
@@ -320,15 +320,15 @@ FID is not computed during training on this branch. To measure it afterwards (sl
 build the reference statistics with `minidog.fid_stats` as in the Quickstart below, then run
 `uv run python -m minidog.offline_eval --config configs/pretrain_e2e-invae_128tok_mse_irepa_eupe_mac.yaml --checkpoint ckpts/pretrain/checkpoints/ep-0000200.pt --batch-size 16`.
 
-**How long it takes on an M5 (16 GB).** Measured on the M5 for caching and for the first training
+**How long it takes on an M4 (48 GB).** Measured on the M4 for caching and for the first training
 steps; the totals are extrapolated from them.
 
 | Step | Work | Time |
 |---|---|---|
 | Cache pretraining features | 26,000 images, about 1.5 s per batch of 8 | about 1.5 hours |
-| Pretrain, 200 epochs | 101 updates per epoch, 13–16 s per update | about 3–4 days |
+| Pretrain, 200 epochs | 101 updates per epoch, 13–16 s per update | about 1-3 days |
 | Cache fine-tuning features | 2,000 images | about 10 minutes |
-| Fine-tune, 100 epochs | 7 updates per epoch, 13–16 s per update | about 3 hours |
+| Fine-tune, 100 epochs | 7 updates per epoch, 13–16 s per update | about 1 hour |
 
 Each update is 16 micro-batches of 16 images. Updates took about 13 s at the start and about 16 s
 after a few minutes of running, probably as the laptop warmed up. Each sample grid adds about
@@ -342,7 +342,7 @@ generation commands; the GPU part then grows to roughly 4 GB.
 **What was tested.** On Linux: the whole non-CUDA path on the CPU (caching, shuffling, pretraining
 with resume, fine-tuning, generation, and FID as one process), unchanged results on CUDA (the
 released checkpoints give HPSv2 0.1624 → 0.2427 and PickScore 18.42 → 19.61 with the paper's noise;
-the paper's 0.1625 differs only by rounding from decoding two images at a time). On a 16 GB M5
+the paper's 0.1625 differs only by rounding from decoding two images at a time). On a 48 GB M4
 MacBook: caching on MPS, and 22 updates of bf16 pretraining on part of the cache, with checkpoints
 and sample grids, plus the memory and times above. Not yet run on the Mac: a full pretraining or
 fine-tuning run, generation, scoring and FID.
