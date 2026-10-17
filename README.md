@@ -32,148 +32,6 @@ transformer.
 
 
 
-## Training on a Mac (Apple silicon, 16 GB)
-
-> [!NOTE]
-> This is the `mac-m5` branch. It runs the best recipe on a Mac's GPU (PyTorch's MPS backend)
-> within 16 GB of shared memory, with the same 256-image updates as the paper:
->
-> - **Micro-batch 16 × 16 accumulation steps** instead of 64 × 4, so each update still averages 256 images.
-> - **A shuffled feature cache with a 500-sample buffer.** The cached shards are sorted by breed;
->   `minidog.shuffle_cache` rewrites them once so every shard holds all 20 breeds, and a 500-sample
->   buffer then mixes the breeds as well as the paper's 5,000-sample buffer (measured: 11.1 breeds per
->   micro-batch of 16 against 10.2) for about 3 GB less RAM.
-> - **Qwen3 and EUPE are not loaded during training** (`training.load_frozen_encoders: false`).
->   Their outputs are cached; the empty caption's embedding, which classifier-free guidance needs,
->   is saved next to the cache as `null_text.pt`.
-> - **A checkpoint every 5 epochs, keeping the newest 2**, so you can stop the laptop and resume.
->
-> Measured on a 16 GB M5 MacBook with the Mac config: the training process uses 5.3–5.8 GB of
-> unified memory during training steps and at most 6.8 GB while a sample grid is drawn (grids are
-> decoded two images at a time), and its data-loading worker another 0.7 GB, so about 6.5 GB in
-> total and 7.5 GB at the peak. macOS and your open apps need the rest, so close what you can.
-> The pretraining cache takes 18 GB (0.68 MB per image), and the shuffled copy needs another 18 GB
-> until the original is deleted; with the data, the Python environment and the model caches, plan
-> for about 45 GB of free disk during caching and 30 GB after.
-
-<details open>
-<summary><b>Steps on the Mac</b> &nbsp;·&nbsp; about 3–4 days of pretraining and 3 hours of fine-tuning on an M5</summary>
-<br>
-
-**Install and download.** `uv` installs Python 3.13 and the macOS build of PyTorch.
-
-```bash
-git clone -b mac-m5 https://github.com/Reyhaneesmailizadeh/minidog && cd minidog
-curl -LsSf https://astral.sh/uv/install.sh | sh   # skip if you already have uv
-uv sync
-
-export DATA=data/dog-t2i-diffusion-data
-uv run hf download reyhanehesi/dog-t2i-diffusion-data \
-    captions_500.json dogs_recaptioned_wds.tar.gz dogs_synthetic_2k_wds.tar.gz --repo-type dataset --local-dir $DATA
-for NAME in dogs_recaptioned_wds dogs_synthetic_2k_wds; do
-  mkdir -p $DATA/$NAME && tar -xzf $DATA/$NAME.tar.gz -C $DATA/$NAME && rm $DATA/$NAME.tar.gz
-done
-
-git clone https://github.com/facebookresearch/EUPE ../EUPE
-uv run hf download facebook/EUPE-ViT-B EUPE-ViT-B.pt --local-dir ../eupe_ckpts
-export EUPE_REPO_DIR=$(realpath ../EUPE) EUPE_CKPT_DIR=$(realpath ../eupe_ckpts)
-```
-
-**1. Cache, shuffle and pretrain.** Run everything as a single process (`python -m`, not
-`torchrun`) and without `--compile`. `caffeinate -i` keeps the Mac awake; stop with Ctrl-C at any
-time and rerun the same command to resume from the newest checkpoint.
-
-```bash
-uv run python -m minidog.precompute_latents_eupe --batch-size 8 \
-    --config configs/pretrain_e2e-invae_128tok_mse_irepa_eupe_mac.yaml \
-    --input-dir $DATA/dogs_recaptioned_wds --output-dir $DATA/dogs_recaptioned_latents_e2e-invae_eupe
-uv run python -m minidog.shuffle_cache --input-dir $DATA/dogs_recaptioned_latents_e2e-invae_eupe \
-    --output-dir $DATA/dogs_recaptioned_latents_e2e-invae_eupe_shuffled
-rm -r $DATA/dogs_recaptioned_latents_e2e-invae_eupe   # the shuffled copy replaces it (18 GB)
-
-export EXPERIMENT_NAME=pretrain
-caffeinate -i uv run python -m minidog.train --config configs/pretrain_e2e-invae_128tok_mse_irepa_eupe_mac.yaml
-```
-
-**2. Fine-tune.**
-
-```bash
-uv run python -m minidog.precompute_latents_eupe --batch-size 8 \
-    --config configs/sft_e2e-invae_128tok_mse_norepa_mac.yaml \
-    --input-dir $DATA/dogs_synthetic_2k_wds --output-dir $DATA/dogs_synthetic_2k_latents_e2e-invae_eupe
-uv run python -m minidog.shuffle_cache --input-dir $DATA/dogs_synthetic_2k_latents_e2e-invae_eupe \
-    --output-dir $DATA/dogs_synthetic_2k_latents_e2e-invae_eupe_shuffled
-
-export EXPERIMENT_NAME=sft
-caffeinate -i uv run python -m minidog.train --config configs/sft_e2e-invae_128tok_mse_norepa_mac.yaml \
-    --ckpt ckpts/pretrain/checkpoints/ep-0000200.pt --init-weights-only
-```
-
-**3. Generate and score.** Both scripts pick the Mac's GPU automatically.
-
-```bash
-for RUN in "pretrain configs/pretrain_e2e-invae_128tok_mse_irepa_eupe_mac.yaml" \
-           "sft configs/sft_e2e-invae_128tok_mse_norepa_mac.yaml"; do
-  set -- $RUN
-  uv run python -m minidog.generate --config $2 \
-      --checkpoint $(ls ckpts/$1/checkpoints/*.pt | tail -1) \
-      --captions-json $DATA/captions_500.json --output-dir results/samples/$1 \
-      --noise-file results/samples/shared_noise_500.pt --group-by-breed
-done
-uv run python -m minidog.score_absolute --dirs results/samples/pretrain results/samples/sft
-```
-
-FID is not computed during training on this branch. To measure it afterwards (slow on a laptop),
-build the reference statistics with `minidog.fid_stats` as in the Quickstart below, then run
-`uv run python -m minidog.offline_eval --config configs/pretrain_e2e-invae_128tok_mse_irepa_eupe_mac.yaml --checkpoint ckpts/pretrain/checkpoints/ep-0000200.pt --batch-size 16`.
-
-**How long it takes on an M5 (16 GB).** Measured on the M5 for caching and for the first training
-steps; the totals are extrapolated from them.
-
-| Step | Work | Time |
-|---|---|---|
-| Cache pretraining features | 26,000 images, about 1.5 s per batch of 8 | about 1.5 hours |
-| Pretrain, 200 epochs | 101 updates per epoch, 13–16 s per update | about 3–4 days |
-| Cache fine-tuning features | 2,000 images | about 10 minutes |
-| Fine-tune, 100 epochs | 7 updates per epoch, 13–16 s per update | about 3 hours |
-
-Each update is 16 micro-batches of 16 images. Updates took about 13 s at the start and about 16 s
-after a few minutes of running, probably as the laptop warmed up. Each sample grid adds about
-75 s; pretraining draws one every 1,000 updates, so 20 grids or about 25 minutes in all. Keep the
-Mac plugged in, and stop and resume at any time with Ctrl-C.
-
-**If something fails on the Mac.** `PYTORCH_ENABLE_MPS_FALLBACK=1` runs any operation MPS lacks on
-the CPU. If bf16 is not supported on your macOS version, add `--precision fp32` to the training and
-generation commands; the GPU part then grows to roughly 4 GB.
-
-**What was tested.** On Linux: the whole non-CUDA path on the CPU (caching, shuffling, pretraining
-with resume, fine-tuning, generation, and FID as one process), unchanged results on CUDA (the
-released checkpoints give HPSv2 0.1624 → 0.2427 and PickScore 18.42 → 19.61 with the paper's noise;
-the paper's 0.1625 differs only by rounding from decoding two images at a time). On a 16 GB M5
-MacBook: caching on MPS, and 22 updates of bf16 pretraining on part of the cache, with checkpoints
-and sample grids, plus the memory and times above. Not yet run on the Mac: a full pretraining or
-fine-tuning run, generation, scoring and FID.
-</details>
-
-
-## Results of the Best Recipe on Mac M4
-
-**Compute:** pre-training ~23 hrs + evaluation ~5 hrs
-
-### Generation quality (Dogs, CFG = 6.0)
-
-| Step  | FID ↓  | Inception Score ↑ |
-|-------|--------|-------------------|
-| 20200 | 8.9238 | 18.1195           |
-
-### Fine-tuning comparison (500 samples each)
-
-| Model        | HPSv2 ↑ | PickScore ↑ |
-|--------------|---------|-------------|
-| Pre-trained  | 0.1570  | 18.41       |
-| SFT          | 0.2397  | 19.55       |
-| **Δ (SFT − pre-trained)** | **+0.0827** | **+1.15** |
-
 ## Quickstart
 
 > [!NOTE]
@@ -460,6 +318,153 @@ for example `pretrain_e2e-invae_128tok_mse_irepa_eupe.yaml` for the final recipe
 | Utilities | [`utils/`](minidog/utils/) | checkpoints, distributed, optimizer, resume, W&B |
 | Other | [`configs/`](configs/), [`toy_flow_matching.ipynb`](toy_flow_matching.ipynb), [`docs/`](docs/) | experiment configs, the warm-up, the project page |
 </details>
+
+
+
+
+
+
+## Training on a Mac (Apple silicon, 16 GB)
+
+> [!NOTE]
+> This is the `mac-m5` branch. It runs the best recipe on a Mac's GPU (PyTorch's MPS backend)
+> within 16 GB of shared memory, with the same 256-image updates as the paper:
+>
+> - **Micro-batch 16 × 16 accumulation steps** instead of 64 × 4, so each update still averages 256 images.
+> - **A shuffled feature cache with a 500-sample buffer.** The cached shards are sorted by breed;
+>   `minidog.shuffle_cache` rewrites them once so every shard holds all 20 breeds, and a 500-sample
+>   buffer then mixes the breeds as well as the paper's 5,000-sample buffer (measured: 11.1 breeds per
+>   micro-batch of 16 against 10.2) for about 3 GB less RAM.
+> - **Qwen3 and EUPE are not loaded during training** (`training.load_frozen_encoders: false`).
+>   Their outputs are cached; the empty caption's embedding, which classifier-free guidance needs,
+>   is saved next to the cache as `null_text.pt`.
+> - **A checkpoint every 5 epochs, keeping the newest 2**, so you can stop the laptop and resume.
+>
+> Measured on a 16 GB M5 MacBook with the Mac config: the training process uses 5.3–5.8 GB of
+> unified memory during training steps and at most 6.8 GB while a sample grid is drawn (grids are
+> decoded two images at a time), and its data-loading worker another 0.7 GB, so about 6.5 GB in
+> total and 7.5 GB at the peak. macOS and your open apps need the rest, so close what you can.
+> The pretraining cache takes 18 GB (0.68 MB per image), and the shuffled copy needs another 18 GB
+> until the original is deleted; with the data, the Python environment and the model caches, plan
+> for about 45 GB of free disk during caching and 30 GB after.
+
+<details open>
+<summary><b>Steps on the Mac</b> &nbsp;·&nbsp; about 3–4 days of pretraining and 3 hours of fine-tuning on an M5</summary>
+<br>
+
+**Install and download.** `uv` installs Python 3.13 and the macOS build of PyTorch.
+
+```bash
+git clone -b mac-m5 https://github.com/Reyhaneesmailizadeh/minidog && cd minidog
+curl -LsSf https://astral.sh/uv/install.sh | sh   # skip if you already have uv
+uv sync
+
+export DATA=data/dog-t2i-diffusion-data
+uv run hf download reyhanehesi/dog-t2i-diffusion-data \
+    captions_500.json dogs_recaptioned_wds.tar.gz dogs_synthetic_2k_wds.tar.gz --repo-type dataset --local-dir $DATA
+for NAME in dogs_recaptioned_wds dogs_synthetic_2k_wds; do
+  mkdir -p $DATA/$NAME && tar -xzf $DATA/$NAME.tar.gz -C $DATA/$NAME && rm $DATA/$NAME.tar.gz
+done
+
+git clone https://github.com/facebookresearch/EUPE ../EUPE
+uv run hf download facebook/EUPE-ViT-B EUPE-ViT-B.pt --local-dir ../eupe_ckpts
+export EUPE_REPO_DIR=$(realpath ../EUPE) EUPE_CKPT_DIR=$(realpath ../eupe_ckpts)
+```
+
+**1. Cache, shuffle and pretrain.** Run everything as a single process (`python -m`, not
+`torchrun`) and without `--compile`. `caffeinate -i` keeps the Mac awake; stop with Ctrl-C at any
+time and rerun the same command to resume from the newest checkpoint.
+
+```bash
+uv run python -m minidog.precompute_latents_eupe --batch-size 8 \
+    --config configs/pretrain_e2e-invae_128tok_mse_irepa_eupe_mac.yaml \
+    --input-dir $DATA/dogs_recaptioned_wds --output-dir $DATA/dogs_recaptioned_latents_e2e-invae_eupe
+uv run python -m minidog.shuffle_cache --input-dir $DATA/dogs_recaptioned_latents_e2e-invae_eupe \
+    --output-dir $DATA/dogs_recaptioned_latents_e2e-invae_eupe_shuffled
+rm -r $DATA/dogs_recaptioned_latents_e2e-invae_eupe   # the shuffled copy replaces it (18 GB)
+
+export EXPERIMENT_NAME=pretrain
+caffeinate -i uv run python -m minidog.train --config configs/pretrain_e2e-invae_128tok_mse_irepa_eupe_mac.yaml
+```
+
+**2. Fine-tune.**
+
+```bash
+uv run python -m minidog.precompute_latents_eupe --batch-size 8 \
+    --config configs/sft_e2e-invae_128tok_mse_norepa_mac.yaml \
+    --input-dir $DATA/dogs_synthetic_2k_wds --output-dir $DATA/dogs_synthetic_2k_latents_e2e-invae_eupe
+uv run python -m minidog.shuffle_cache --input-dir $DATA/dogs_synthetic_2k_latents_e2e-invae_eupe \
+    --output-dir $DATA/dogs_synthetic_2k_latents_e2e-invae_eupe_shuffled
+
+export EXPERIMENT_NAME=sft
+caffeinate -i uv run python -m minidog.train --config configs/sft_e2e-invae_128tok_mse_norepa_mac.yaml \
+    --ckpt ckpts/pretrain/checkpoints/ep-0000200.pt --init-weights-only
+```
+
+**3. Generate and score.** Both scripts pick the Mac's GPU automatically.
+
+```bash
+for RUN in "pretrain configs/pretrain_e2e-invae_128tok_mse_irepa_eupe_mac.yaml" \
+           "sft configs/sft_e2e-invae_128tok_mse_norepa_mac.yaml"; do
+  set -- $RUN
+  uv run python -m minidog.generate --config $2 \
+      --checkpoint $(ls ckpts/$1/checkpoints/*.pt | tail -1) \
+      --captions-json $DATA/captions_500.json --output-dir results/samples/$1 \
+      --noise-file results/samples/shared_noise_500.pt --group-by-breed
+done
+uv run python -m minidog.score_absolute --dirs results/samples/pretrain results/samples/sft
+```
+
+FID is not computed during training on this branch. To measure it afterwards (slow on a laptop),
+build the reference statistics with `minidog.fid_stats` as in the Quickstart below, then run
+`uv run python -m minidog.offline_eval --config configs/pretrain_e2e-invae_128tok_mse_irepa_eupe_mac.yaml --checkpoint ckpts/pretrain/checkpoints/ep-0000200.pt --batch-size 16`.
+
+**How long it takes on an M5 (16 GB).** Measured on the M5 for caching and for the first training
+steps; the totals are extrapolated from them.
+
+| Step | Work | Time |
+|---|---|---|
+| Cache pretraining features | 26,000 images, about 1.5 s per batch of 8 | about 1.5 hours |
+| Pretrain, 200 epochs | 101 updates per epoch, 13–16 s per update | about 3–4 days |
+| Cache fine-tuning features | 2,000 images | about 10 minutes |
+| Fine-tune, 100 epochs | 7 updates per epoch, 13–16 s per update | about 3 hours |
+
+Each update is 16 micro-batches of 16 images. Updates took about 13 s at the start and about 16 s
+after a few minutes of running, probably as the laptop warmed up. Each sample grid adds about
+75 s; pretraining draws one every 1,000 updates, so 20 grids or about 25 minutes in all. Keep the
+Mac plugged in, and stop and resume at any time with Ctrl-C.
+
+**If something fails on the Mac.** `PYTORCH_ENABLE_MPS_FALLBACK=1` runs any operation MPS lacks on
+the CPU. If bf16 is not supported on your macOS version, add `--precision fp32` to the training and
+generation commands; the GPU part then grows to roughly 4 GB.
+
+**What was tested.** On Linux: the whole non-CUDA path on the CPU (caching, shuffling, pretraining
+with resume, fine-tuning, generation, and FID as one process), unchanged results on CUDA (the
+released checkpoints give HPSv2 0.1624 → 0.2427 and PickScore 18.42 → 19.61 with the paper's noise;
+the paper's 0.1625 differs only by rounding from decoding two images at a time). On a 16 GB M5
+MacBook: caching on MPS, and 22 updates of bf16 pretraining on part of the cache, with checkpoints
+and sample grids, plus the memory and times above. Not yet run on the Mac: a full pretraining or
+fine-tuning run, generation, scoring and FID.
+</details>
+
+
+## Results of the Best Recipe on Mac M4
+
+**Compute:** pre-training ~23 hrs + evaluation ~5 hrs
+
+### Generation quality (Dogs, CFG = 6.0)
+
+| Step  | FID ↓  | Inception Score ↑ |
+|-------|--------|-------------------|
+| 20200 | 8.9238 | 18.1195           |
+
+### Fine-tuning comparison (500 samples each)
+
+| Model        | HPSv2 ↑ | PickScore ↑ |
+|--------------|---------|-------------|
+| Pre-trained  | 0.1570  | 18.41       |
+| SFT          | 0.2397  | 19.55       |
+| **Δ (SFT − pre-trained)** | **+0.0827** | **+1.15** |
 
 ## Citation
 
