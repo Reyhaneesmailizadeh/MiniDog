@@ -155,6 +155,25 @@ and sample grids, plus the memory and times above. Not yet run on the Mac: a ful
 fine-tuning run, generation, scoring and FID.
 </details>
 
+
+## Results of the Best Recipe on Mac M4
+
+**Compute:** pre-training ~23 hrs + evaluation ~5 hrs
+
+### Generation quality (Dogs, CFG = 6.0)
+
+| Step  | FID ↓  | Inception Score ↑ |
+|-------|--------|-------------------|
+| 20200 | 8.9238 | 18.1195           |
+
+### Fine-tuning comparison (500 samples each)
+
+| Model        | HPSv2 ↑ | PickScore ↑ |
+|--------------|---------|-------------|
+| Pre-trained  | 0.1570  | 18.41       |
+| SFT          | 0.2397  | 19.55       |
+| **Δ (SFT − pre-trained)** | **+0.0827** | **+1.15** |
+
 ## Quickstart
 
 > [!NOTE]
