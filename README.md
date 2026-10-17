@@ -224,105 +224,6 @@ uv run torchrun --standalone --nproc_per_node=4 -m minidog.precompute_latents_pe
 configs that are not in the paper, and every path, are listed in [`configs/README.md`](configs/README.md).
 </details>
 
-## More
-
-<details>
-<summary><b>Tips: fewer GPUs, logging, resuming, CFG sweeps</b></summary>
-
-- **Fewer or more GPUs.** Set `--nproc_per_node` to your GPU count. The global batch of 256 is split
-  across the GPUs; if memory runs out, raise `training.grad_accum_steps` in the config.
-- **Outputs.** Checkpoints and sample grids go to `ckpts/$EXPERIMENT_NAME/`, FID and IS to `results/evals/`.
-- **Resuming.** Re-running with the same `EXPERIMENT_NAME` resumes from the latest checkpoint.
-- **Weights & Biases.** Add `--wandb` and set `ENTITY`, `PROJECT` and `WANDB_KEY`.
-- **Score one checkpoint, or sweep the CFG scale:**
-
-  ```bash
-  uv run torchrun --standalone --nproc_per_node=4 -m minidog.offline_eval --config <cfg> --checkpoint <ckpt> --cfg-scale 1.5 2.0 6.0
-  ```
-
-- **Pairwise comparison.** `minidog.score` compares two sample folders and prints the PickScore win rate
-  and HPSv2 means, per breed and overall.
-</details>
-
-<details>
-<summary><b>Hardware and software used in the paper</b></summary>
-
-All runs use 4 of the 8 NVIDIA RTX 3090 GPUs (24 GB, 350 W) in a single server, connected over PCIe 4.0
-without NVLink, with two AMD EPYC 7343 CPUs (32 cores in total), 256 GB of RAM, and the cached inputs on
-a local NVMe SSD. The software stack is Ubuntu 24.04, NVIDIA driver 590.44, Python 3.13, PyTorch 2.10.0
-with CUDA 12.8, cuDNN 9.10, NCCL 2.27, and Triton 3.6; `pyproject.toml` and `uv.lock` pin every package
-version. Training uses PyTorch DistributedDataParallel over the 4 GPUs (64 images per GPU). Every
-hyperparameter is in the paper's appendix and in the two configs of the final recipe.
-</details>
-
-<details>
-<summary><b>Warm-up: flow matching on 2D toy data (CPU, about 15 minutes)</b></summary>
-
-```bash
-uv sync
-uv run jupyter lab toy_flow_matching.ipynb
-```
-
-Run [the notebook](toy_flow_matching.ipynb) top to bottom; each cell is explained in the markdown above
-it. You will learn how a flow-matching model is trained and sampled, and why predicting the clean data
-beats predicting the velocity when the data lives in a high-dimensional space, while MiniDog can still
-use v-prediction in its compressed latent space.
-</details>
-
-<details>
-<summary><b>Where each concept lives in the code</b></summary>
-
-| Flow-matching concept | Warm-up: [`toy_flow_matching.ipynb`](toy_flow_matching.ipynb) | Pipeline: [`minidog/`](minidog/) |
-|---|---|---|
-| Forward process `x_t = (1-t) x + t eps` | *Flow matching* cell, `training_losses` | [`Transport.sample`](minidog/transport.py#L103) |
-| Target `v = eps - x`, MSE loss | same cell | [`compute_loss`](minidog/transport.py#L156) |
-| x- vs v-prediction | `pred_type` branches | [`convert_model_pred`](minidog/transport.py#L149), config [`transport.prediction`](configs/pretrain_e2e-invae_128tok_mse_irepa_eupe.yaml#L28) |
-| Timestep sampling during training | uniform `t` | [`get_time_sampler`](minidog/transport.py#L79), logit-normal |
-| Euler sampling from noise to data | `sample` | [`Sampler.sample_ode`](minidog/transport.py#L176) |
-| Time conditioning of the network | *Model* cell, `SinusoidalEmbedding` | [`GaussianFourierEmbedding`](minidog/dit.py#L86), 4 time tokens |
-| The denoiser | `MLPDenoiser` | [`LightningDiT`](minidog/dit.py#L140) |
-| Conditioning on text | — | [`TextEncoder`](minidog/text_encoder.py#L8), [`ConditionEmbedder`](minidog/dit.py#L104) |
-| Classifier-free guidance | — | [`apply_cfg_dropout`](minidog/transport.py#L15) (train), [`forward_with_cfg`](minidog/transport.py#L200) (sample) |
-| Flow matching in a latent space | — | [`VAE.encode`](minidog/vae.py#L153), [`precompute_latents`](minidog/precompute_latents.py#L180) |
-| Representation alignment (REPA) | — | [`DINOv2Encoder`](minidog/dinov2.py#L9), [`repa_projector`](minidog/dit.py#L184), [`loss_repa`](minidog/transport.py#L144) |
-| Target representation and iREPA | — | [`EUPEEncoder`](minidog/eupe.py), [`DINOv3Encoder`](minidog/dinov3.py), [`PESpatialEncoder`](minidog/pe_spatial.py); conv projector and spatial norm in [`dit.py`](minidog/dit.py#L184), [`transport.py`](minidog/transport.py#L131) |
-</details>
-
-<details>
-<summary><b>Configs</b></summary>
-
-One yaml per experiment, named `{stage}_{tokenizer}_{caption length}_{loss}_{alignment}_{target}.yaml`,
-for example `pretrain_e2e-invae_128tok_mse_irepa_eupe.yaml` for the final recipe.
-[`configs/README.md`](configs/README.md) explains every field and lists each config with its result.
-</details>
-
-<details>
-<summary><b>Going further</b></summary>
-
-- Set [`transport.prediction`](configs/pretrain_e2e-invae_128tok_mse_irepa_eupe.yaml#L28) to `x` and compare FID curves: the warm-up question at full scale.
-- Turn [`repa.use_repa`](configs/pretrain_e2e-invae_128tok_mse_irepa_eupe.yaml#L86) off, change `repa.repa_layer_depth`, or swap the target representation.
-- Try another tokenizer: add a class with `encode`/`decode` to [`minidog/vae.py`](minidog/vae.py) and point [`stage_1.target`](configs/pretrain_e2e-invae_128tok_mse_irepa_eupe.yaml#L2) at it, e.g. the [FLUX.2](https://huggingface.co/black-forest-labs/FLUX.2-dev) VAE or [RAEv2](https://github.com/nanovisionx/RAEv2).
-- Sweep [`guidance.cfg.scale`](configs/pretrain_e2e-invae_128tok_mse_irepa_eupe.yaml#L36) on a checkpoint with `minidog.offline_eval`.
-- Fine-tune on your own images: pack `jpg` + `txt` WebDataset shards, build FID stats with `minidog.fid_stats`, cache them with the SFT config, and train from the pretrained checkpoint.
-</details>
-
-<details>
-<summary><b>Repository layout</b></summary>
-
-| | Files | What |
-|---|---|---|
-| Model and objective | [`dit.py`](minidog/dit.py), [`transport.py`](minidog/transport.py) | LightningDiT; flow matching, Euler sampler, CFG |
-| Frozen components | [`vae.py`](minidog/vae.py), [`text_encoder.py`](minidog/text_encoder.py), [`eupe.py`](minidog/eupe.py), [`dinov2.py`](minidog/dinov2.py), [`dinov3.py`](minidog/dinov3.py), [`pe_spatial.py`](minidog/pe_spatial.py) | tokenizer, Qwen3 captions, the four target representations |
-| Training | [`engine.py`](minidog/engine.py), [`data.py`](minidog/data.py), [`eval.py`](minidog/eval.py), [`config.py`](minidog/config.py) | epoch loop, loaders, FID/IS, config dataclasses |
-| Entry points | [`precompute_latents`](minidog/precompute_latents.py) (and `_eupe`, `_dinov3`, `_pe_spatial`), [`fid_stats`](minidog/fid_stats.py), [`train`](minidog/train.py), [`offline_eval`](minidog/offline_eval.py), [`generate`](minidog/generate.py), [`score_absolute`](minidog/score_absolute.py), [`score`](minidog/score.py), [`recon_eval`](minidog/recon_eval.py) | `python -m minidog.<name>` |
-| Utilities | [`utils/`](minidog/utils/) | checkpoints, distributed, optimizer, resume, W&B |
-| Other | [`configs/`](configs/), [`toy_flow_matching.ipynb`](toy_flow_matching.ipynb), [`docs/`](docs/) | experiment configs, the warm-up, the project page |
-</details>
-
-
-
-
-
 
 ## Training on a Mac (Apple silicon, 16 GB)
 
@@ -465,6 +366,108 @@ fine-tuning run, generation, scoring and FID.
 | Pre-trained  | 0.1570  | 18.41       |
 | SFT          | 0.2397  | 19.55       |
 | **Δ (SFT − pre-trained)** | **+0.0827** | **+1.15** |
+
+## More
+
+<details>
+<summary><b>Tips: fewer GPUs, logging, resuming, CFG sweeps</b></summary>
+
+- **Fewer or more GPUs.** Set `--nproc_per_node` to your GPU count. The global batch of 256 is split
+  across the GPUs; if memory runs out, raise `training.grad_accum_steps` in the config.
+- **Outputs.** Checkpoints and sample grids go to `ckpts/$EXPERIMENT_NAME/`, FID and IS to `results/evals/`.
+- **Resuming.** Re-running with the same `EXPERIMENT_NAME` resumes from the latest checkpoint.
+- **Weights & Biases.** Add `--wandb` and set `ENTITY`, `PROJECT` and `WANDB_KEY`.
+- **Score one checkpoint, or sweep the CFG scale:**
+
+  ```bash
+  uv run torchrun --standalone --nproc_per_node=4 -m minidog.offline_eval --config <cfg> --checkpoint <ckpt> --cfg-scale 1.5 2.0 6.0
+  ```
+
+- **Pairwise comparison.** `minidog.score` compares two sample folders and prints the PickScore win rate
+  and HPSv2 means, per breed and overall.
+</details>
+
+<details>
+<summary><b>Hardware and software used in the paper</b></summary>
+
+All runs use 4 of the 8 NVIDIA RTX 3090 GPUs (24 GB, 350 W) in a single server, connected over PCIe 4.0
+without NVLink, with two AMD EPYC 7343 CPUs (32 cores in total), 256 GB of RAM, and the cached inputs on
+a local NVMe SSD. The software stack is Ubuntu 24.04, NVIDIA driver 590.44, Python 3.13, PyTorch 2.10.0
+with CUDA 12.8, cuDNN 9.10, NCCL 2.27, and Triton 3.6; `pyproject.toml` and `uv.lock` pin every package
+version. Training uses PyTorch DistributedDataParallel over the 4 GPUs (64 images per GPU). Every
+hyperparameter is in the paper's appendix and in the two configs of the final recipe.
+</details>
+
+<details>
+<summary><b>Warm-up: flow matching on 2D toy data (CPU, about 15 minutes)</b></summary>
+
+```bash
+uv sync
+uv run jupyter lab toy_flow_matching.ipynb
+```
+
+Run [the notebook](toy_flow_matching.ipynb) top to bottom; each cell is explained in the markdown above
+it. You will learn how a flow-matching model is trained and sampled, and why predicting the clean data
+beats predicting the velocity when the data lives in a high-dimensional space, while MiniDog can still
+use v-prediction in its compressed latent space.
+</details>
+
+<details>
+<summary><b>Where each concept lives in the code</b></summary>
+
+| Flow-matching concept | Warm-up: [`toy_flow_matching.ipynb`](toy_flow_matching.ipynb) | Pipeline: [`minidog/`](minidog/) |
+|---|---|---|
+| Forward process `x_t = (1-t) x + t eps` | *Flow matching* cell, `training_losses` | [`Transport.sample`](minidog/transport.py#L103) |
+| Target `v = eps - x`, MSE loss | same cell | [`compute_loss`](minidog/transport.py#L156) |
+| x- vs v-prediction | `pred_type` branches | [`convert_model_pred`](minidog/transport.py#L149), config [`transport.prediction`](configs/pretrain_e2e-invae_128tok_mse_irepa_eupe.yaml#L28) |
+| Timestep sampling during training | uniform `t` | [`get_time_sampler`](minidog/transport.py#L79), logit-normal |
+| Euler sampling from noise to data | `sample` | [`Sampler.sample_ode`](minidog/transport.py#L176) |
+| Time conditioning of the network | *Model* cell, `SinusoidalEmbedding` | [`GaussianFourierEmbedding`](minidog/dit.py#L86), 4 time tokens |
+| The denoiser | `MLPDenoiser` | [`LightningDiT`](minidog/dit.py#L140) |
+| Conditioning on text | — | [`TextEncoder`](minidog/text_encoder.py#L8), [`ConditionEmbedder`](minidog/dit.py#L104) |
+| Classifier-free guidance | — | [`apply_cfg_dropout`](minidog/transport.py#L15) (train), [`forward_with_cfg`](minidog/transport.py#L200) (sample) |
+| Flow matching in a latent space | — | [`VAE.encode`](minidog/vae.py#L153), [`precompute_latents`](minidog/precompute_latents.py#L180) |
+| Representation alignment (REPA) | — | [`DINOv2Encoder`](minidog/dinov2.py#L9), [`repa_projector`](minidog/dit.py#L184), [`loss_repa`](minidog/transport.py#L144) |
+| Target representation and iREPA | — | [`EUPEEncoder`](minidog/eupe.py), [`DINOv3Encoder`](minidog/dinov3.py), [`PESpatialEncoder`](minidog/pe_spatial.py); conv projector and spatial norm in [`dit.py`](minidog/dit.py#L184), [`transport.py`](minidog/transport.py#L131) |
+</details>
+
+<details>
+<summary><b>Configs</b></summary>
+
+One yaml per experiment, named `{stage}_{tokenizer}_{caption length}_{loss}_{alignment}_{target}.yaml`,
+for example `pretrain_e2e-invae_128tok_mse_irepa_eupe.yaml` for the final recipe.
+[`configs/README.md`](configs/README.md) explains every field and lists each config with its result.
+</details>
+
+<details>
+<summary><b>Going further</b></summary>
+
+- Set [`transport.prediction`](configs/pretrain_e2e-invae_128tok_mse_irepa_eupe.yaml#L28) to `x` and compare FID curves: the warm-up question at full scale.
+- Turn [`repa.use_repa`](configs/pretrain_e2e-invae_128tok_mse_irepa_eupe.yaml#L86) off, change `repa.repa_layer_depth`, or swap the target representation.
+- Try another tokenizer: add a class with `encode`/`decode` to [`minidog/vae.py`](minidog/vae.py) and point [`stage_1.target`](configs/pretrain_e2e-invae_128tok_mse_irepa_eupe.yaml#L2) at it, e.g. the [FLUX.2](https://huggingface.co/black-forest-labs/FLUX.2-dev) VAE or [RAEv2](https://github.com/nanovisionx/RAEv2).
+- Sweep [`guidance.cfg.scale`](configs/pretrain_e2e-invae_128tok_mse_irepa_eupe.yaml#L36) on a checkpoint with `minidog.offline_eval`.
+- Fine-tune on your own images: pack `jpg` + `txt` WebDataset shards, build FID stats with `minidog.fid_stats`, cache them with the SFT config, and train from the pretrained checkpoint.
+</details>
+
+<details>
+<summary><b>Repository layout</b></summary>
+
+| | Files | What |
+|---|---|---|
+| Model and objective | [`dit.py`](minidog/dit.py), [`transport.py`](minidog/transport.py) | LightningDiT; flow matching, Euler sampler, CFG |
+| Frozen components | [`vae.py`](minidog/vae.py), [`text_encoder.py`](minidog/text_encoder.py), [`eupe.py`](minidog/eupe.py), [`dinov2.py`](minidog/dinov2.py), [`dinov3.py`](minidog/dinov3.py), [`pe_spatial.py`](minidog/pe_spatial.py) | tokenizer, Qwen3 captions, the four target representations |
+| Training | [`engine.py`](minidog/engine.py), [`data.py`](minidog/data.py), [`eval.py`](minidog/eval.py), [`config.py`](minidog/config.py) | epoch loop, loaders, FID/IS, config dataclasses |
+| Entry points | [`precompute_latents`](minidog/precompute_latents.py) (and `_eupe`, `_dinov3`, `_pe_spatial`), [`fid_stats`](minidog/fid_stats.py), [`train`](minidog/train.py), [`offline_eval`](minidog/offline_eval.py), [`generate`](minidog/generate.py), [`score_absolute`](minidog/score_absolute.py), [`score`](minidog/score.py), [`recon_eval`](minidog/recon_eval.py) | `python -m minidog.<name>` |
+| Utilities | [`utils/`](minidog/utils/) | checkpoints, distributed, optimizer, resume, W&B |
+| Other | [`configs/`](configs/), [`toy_flow_matching.ipynb`](toy_flow_matching.ipynb), [`docs/`](docs/) | experiment configs, the warm-up, the project page |
+</details>
+
+
+
+
+
+
+
 
 ## Citation
 
